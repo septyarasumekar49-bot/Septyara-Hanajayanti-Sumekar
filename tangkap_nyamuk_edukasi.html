@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Game Edukasi: Tangkap Nyamuk</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- MediaPipe Camera Utils & Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Nunito', sans-serif;
+            background-color: #a8d5e2;
+            overflow: hidden;
+            touch-action: none;
+        }
+        
+        h1, h2, h3, .font-heading {
+            font-family: 'Fredoka One', cursive;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+        }
+
+        /* UI Overlays */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(5px);
+            transition: opacity 0.3s ease;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Buttons */
+        .btn-game {
+            background: linear-gradient(to bottom, #ff9a9e 0%, #fecfef 99%, #fecfef 100%);
+            border: 4px solid #ff758c;
+            color: #d81b60;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 8px 0 #ff758c, 0 15px 20px rgba(0,0,0,0.2);
+            transition: all 0.1s;
+            text-transform: uppercase;
+            font-family: 'Fredoka One', cursive;
+            margin: 10px;
+        }
+
+        .btn-game:active {
+            transform: translateY(8px);
+            box-shadow: 0 0px 0 #ff758c, 0 5px 10px rgba(0,0,0,0.2);
+        }
+        
+        .btn-blue {
+            background: linear-gradient(to bottom, #84fab0 0%, #8fd3f4 100%);
+            border-color: #4facfe;
+            color: #1e88e5;
+            box-shadow: 0 8px 0 #4facfe, 0 15px 20px rgba(0,0,0,0.2);
+        }
+        .btn-blue:active {
+            box-shadow: 0 0px 0 #4facfe, 0 5px 10px rgba(0,0,0,0.2);
+        }
+
+        .game-hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 20px;
+            z-index: 15;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .hud-panel {
+            background: white;
+            border: 4px solid #ffb7b2;
+            border-radius: 20px;
+            padding: 10px 20px;
+            box-shadow: 0 6px 0 #ffb7b2;
+            text-align: center;
+        }
+
+        .split-line {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            width: 6px;
+            height: 100%;
+            background: rgba(255,255,255,0.5);
+            border-left: 2px dashed #ff758c;
+            transform: translateX(-50%);
+            z-index: 11;
+        }
+
+        #debug-panel {
+            position: absolute;
+            bottom: 60px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: lime;
+            font-family: monospace;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 50;
+            pointer-events: none;
+        }
+
+        .footer {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            z-index: 50;
+            font-weight: bold;
+            color: #333;
+            background: rgba(255,255,255,0.7);
+            padding: 5px 0;
+        }
+
+        /* Particle Canvas */
+        #fxCanvas {
+            pointer-events: none;
+            z-index: 12;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <!-- Media Elements -->
+    <video id="webcam" class="hidden" autoplay playsinline></video>
+    
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+    <canvas id="fxCanvas"></canvas>
+
+    <!-- Battle Mode Split Line -->
+    <div id="split-line" class="split-line hidden"></div>
+
+    <!-- HUD -->
+    <div id="hud" class="game-hud hidden">
+        <div class="hud-panel w-1/4">
+            <h2 class="text-xl font-heading text-pink-500" id="p1-name">Pemain 1</h2>
+            <p class="text-3xl font-heading text-gray-700">Skor: <span id="p1-score">0</span></p>
+        </div>
+        <div class="hud-panel w-1/4 flex flex-col items-center border-blue-300 shadow-[0_6px_0_#93c5fd]">
+            <h2 class="text-lg font-bold text-blue-600">Waktu</h2>
+            <p class="text-4xl font-heading text-red-500" id="timer">60</p>
+            <p class="text-sm font-bold text-gray-600 mt-2">Target: <span id="hud-target-number" class="text-2xl text-purple-600">?</span></p>
+        </div>
+        <div class="hud-panel w-1/4 hidden" id="hud-p2">
+            <h2 class="text-xl font-heading text-blue-500" id="p2-name">Pemain 2</h2>
+            <p class="text-3xl font-heading text-gray-700">Skor: <span id="p2-score">0</span></p>
+        </div>
+    </div>
+
+    <!-- Menu Screen -->
+    <div id="screen-menu" class="overlay">
+        <h1 class="text-6xl text-pink-500 mb-2 drop-shadow-lg text-center leading-tight">Tangkap Nyamuk<br><span class="text-4xl text-blue-500">Angka Edukasi</span></h1>
+        <p class="text-xl text-gray-700 mb-8 font-bold">Latih kecepatan dan berhitung dengan tanganmu!</p>
+        
+        <div class="flex gap-4">
+            <button class="btn-game btn-blue" onclick="startGameMode('solo')">👤 Mode Solo</button>
+            <button class="btn-game" onclick="startGameMode('battle')">⚔️ Mode Battle</button>
+        </div>
+        
+        <div class="mt-8 p-4 bg-white rounded-xl shadow-lg border-2 border-gray-200 text-center">
+            <h3 class="font-heading text-lg text-gray-600 mb-2">Pengaturan Sensitivitas (Area Tangkapan)</h3>
+            <div class="flex gap-2 justify-center">
+                <button class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 font-bold" onclick="setSensitivity('low')">Rendah</button>
+                <button class="px-4 py-2 bg-green-200 rounded-lg border-2 border-green-500 font-bold" id="btn-sens-med" onclick="setSensitivity('medium')">Sedang</button>
+                <button class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 font-bold" onclick="setSensitivity('high')">Tinggi (Cepat)</button>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">*Tinggi direkomendasikan agar gerakan cepat tidak terlewat.</p>
+        </div>
+    </div>
+
+    <!-- Loading & Calibration Screen -->
+    <div id="screen-calibration" class="overlay hidden">
+        <h2 class="text-4xl text-blue-600 mb-4 font-heading" id="calib-title">Menyiapkan Kamera...</h2>
+        <p class="text-xl text-gray-700 mb-6 font-bold" id="calib-desc">Mohon izinkan akses kamera di browser Anda.</p>
+        
+        <div class="w-64 h-64 border-4 border-dashed border-pink-400 rounded-3xl flex items-center justify-center bg-white/50 mb-6 relative overflow-hidden" id="calib-cam-preview">
+            <div class="animate-pulse text-pink-500 font-bold">Menunggu...</div>
+        </div>
+
+        <p class="text-lg text-gray-600 mb-4 font-bold hidden" id="calib-instruction">Tunjukkan tanganmu ke kamera. Gerakkan untuk kalibrasi.</p>
+        
+        <button id="btn-start-game" class="btn-game btn-blue hidden" onclick="startPlayPhase()">Mulai Bermain!</button>
+    </div>
+
+    <!-- Result Screen -->
+    <div id="screen-result" class="overlay hidden">
+        <h1 class="text-6xl text-pink-500 mb-4 drop-shadow-lg" id="result-title">Waktu Habis!</h1>
+        
+        <div class="flex gap-8 mb-8" id="result-scores">
+            <div class="bg-white p-6 border-4 border-pink-300 rounded-3xl shadow-xl text-center min-w-[200px]">
+                <h3 class="text-2xl font-heading text-gray-700" id="res-p1-name">Pemain 1</h3>
+                <p class="text-5xl font-heading text-pink-500 mt-2" id="res-p1-score">0</p>
+            </div>
+            <div class="bg-white p-6 border-4 border-blue-300 rounded-3xl shadow-xl text-center min-w-[200px] hidden" id="res-p2-box">
+                <h3 class="text-2xl font-heading text-gray-700" id="res-p2-name">Pemain 2</h3>
+                <p class="text-5xl font-heading text-blue-500 mt-2" id="res-p2-score">0</p>
+            </div>
+        </div>
+
+        <p class="text-2xl font-bold text-gray-700 mb-8" id="result-winner-text"></p>
+        
+        <div class="flex gap-4">
+            <button class="btn-game btn-blue" onclick="resetToMenu()">Ke Menu Utama</button>
+            <button class="btn-game" onclick="startGameMode(currentMode)">Main Lagi</button>
+        </div>
+    </div>
+
+    <!-- Debug Panel -->
+    <div id="debug-panel">
+        <div>FPS: <span id="dbg-fps">0</span></div>
+        <div>Tangan Terdeteksi: <span id="dbg-hands">0</span></div>
+        <div>Sensitivitas: <span id="dbg-sens">Sedang (1.3x)</span></div>
+        <div>Status: <span id="dbg-status">Menunggu</span></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        Dikembangkan oleh Giga Inovation | Kontak: 081329200985
+    </div>
+</div>
+
+<script>
+    /* =========================================================================
+       KONFIGURASI & VARIABEL GLOBAL
+       ========================================================================= */
+    const GAME_DURATION = 60; // Detik
+    let currentMode = 'solo';
+    let gameState = 'menu'; // menu, calibration, playing, result
+    
+    // Konfigurasi Sensitivitas (Pengganda ukuran hitbox nyamuk untuk tangan)
+    // Tinggi = hitbox tangan lebih besar agar gerakan cepat masuk.
+    let hitBoxMultiplier = 1.3; 
+
+    // Elemen DOM
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const fxCanvas = document.getElementById('fxCanvas');
+    const fxCtx = fxCanvas.getContext('2d');
+    const video = document.getElementById('webcam');
+    
+    // State Game
+    let scoreP1 = 0;
+    let scoreP2 = 0;
+    let timeLeft = GAME_DURATION;
+    let targetNumber = 0;
+    let timerInterval;
+    let gameLoopRef;
+    
+    // Objek Game
+    let mosquitos = [];
+    let particles = [];
+    let activeHands = []; // Menyimpan posisi tangan dari frame sebelumnya untuk line-intersection
+
+    // Konfigurasi MediaPipe
+    let hands, camera;
+    let isCameraReady = false;
+    
+    // Audio (Speech Synthesis)
+    let synth = window.speechSynthesis;
+    let idVoice = null;
+
+    /* =========================================================================
+       SETUP & RESIZE
+       ========================================================================= */
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        fxCanvas.width = window.innerWidth;
+        fxCanvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function setSensitivity(level) {
+        document.querySelectorAll('#screen-menu button').forEach(b => {
+            if(b.innerText.includes('Rendah') || b.innerText.includes('Sedang') || b.innerText.includes('Tinggi')) {
+                b.classList.remove('border-2', 'border-green-500', 'bg-green-200');
+                b.classList.add('bg-gray-200');
+            }
+        });
+        const btn = event.target;
+        btn.classList.remove('bg-gray-200', 'hover:bg-gray-300');
+        btn.classList.add('border-2', 'border-green-500', 'bg-green-200');
+
+        if(level === 'low') hitBoxMultiplier = 1.0;
+        else if(level === 'medium') hitBoxMultiplier = 1.3;
+        else if(level === 'high') hitBoxMultiplier = 1.7; // Super sensitif
+
+        document.getElementById('dbg-sens').innerText = `${level} (${hitBoxMultiplier}x)`;
+    }
+
+    /* =========================================================================
+       AUDIO INSTRUCTIONS
+       ========================================================================= */
+    function initSpeech() {
+        // Coba cari suara bahasa Indonesia
+        const voices = synth.getVoices();
+        idVoice = voices.find(v => v.lang === 'id-ID') || voices[0];
+    }
+    
+    // Safari/Chrome terkadang telat memuat suara
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = initSpeech;
+    }
+
+    function speak(text) {
+        if (synth.speaking) {
+            synth.cancel();
+        }
+        const utterance = new SpeechSynthesisUtterance(text);
+        if (idVoice) utterance.voice = idVoice;
+        utterance.lang = 'id-ID';
+        utterance.rate = 1.1; // Sedikit lebih cepat agar anak tidak bosan
+        utterance.pitch = 1.2; // Sedikit tinggi agar ceria
+        synth.speak(utterance);
+    }
+
+    /* =========================================================================
+       MEDIAPIPE HAND TRACKING & KAMERA
+       ========================================================================= */
+    async function initMediaPipe() {
+        if (hands) return; // Sudah diinisialisasi
+        
+        document.getElementById('dbg-status').innerText = "Memuat MediaPipe...";
+        
+        hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+        
+        // Mode Battle butuh deteksi max 4 tangan (2 orang x 2 tangan)
+        hands.setOptions({
+            maxNumHands: 4,
+            modelComplexity: 1, // Keseimbangan kecepatan dan akurasi
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+        
+        hands.onResults(onHandResults);
+
+        camera = new Camera(video, {
+            onFrame: async () => {
+                await hands.send({image: video});
+            },
+            width: 640,
+            height: 480
+        });
+    }
+
+    // Variabel untuk melacak posisi sebelumnya (SUPER SENSITIF COLLISION)
+    let handHistory = [];
+
+    function onHandResults(results) {
+        // Catat frame untuk debug FPS
+        frameCount++;
+
+        if (gameState === 'result') return;
+
+        let currentHands = [];
+
+        if (results.multiHandLandmarks) {
+            document.getElementById('dbg-hands').innerText = results.multiHandLandmarks.length;
+            
+            for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                const landmarks = results.multiHandLandmarks[i];
+                
+                // Gunakan titik tengah telapak tangan (Landmark 9: Middle Finger MCP)
+                // Kamera web defaultnya bercermin. Jadi X harus dibalik: (1 - x)
+                const rawX = 1 - landmarks[9].x; 
+                const rawY = landmarks[9].y;
+                
+                const screenX = rawX * canvas.width;
+                const screenY = rawY * canvas.height;
+
+                // Tentukan Pemain berdasarkan posisi X di layar (jika mode Battle)
+                let playerIndex = 1;
+                if (currentMode === 'battle') {
+                    if (screenX > canvas.width / 2) {
+                        playerIndex = 2; // Setengah Kanan Layar -> Pemain 2
+                    }
+                }
+
+                currentHands.push({
+                    id: i,
+                    x: screenX,
+                    y: screenY,
+                    player: playerIndex
+                });
+            }
+        } else {
+            document.getElementById('dbg-hands').innerText = "0";
+        }
+
+        // Tampilkan preview kalibrasi jika di layar kalibrasi
+        if (gameState === 'calibration') {
+            const previewBox = document.getElementById('calib-cam-preview');
+            if (currentHands.length > 0) {
+                document.getElementById('calib-title').innerText = "Tangan Terdeteksi!";
+                document.getElementById('calib-instruction').classList.remove('hidden');
+                document.getElementById('btn-start-game').classList.remove('hidden');
+                previewBox.innerHTML = '<div class="text-green-500 font-bold text-2xl">Kamera Siap 🎥</div>';
+                previewBox.style.borderColor = "#4ade80";
+            }
+        }
+
+        // Jika sedang main, update sejarah tangan untuk deteksi tabrakan interpolasi garis
+        if (gameState === 'playing') {
+            // Cocokkan id tangan dengan history terdekat untuk menyimpan prevX dan prevY
+            for (let ch of currentHands) {
+                let closestDist = Infinity;
+                let match = null;
+                for (let hh of handHistory) {
+                    if (hh.player === ch.player) {
+                        let d = distSq(ch.x, ch.y, hh.x, hh.y);
+                        if (d < closestDist) {
+                            closestDist = d;
+                            match = hh;
+                        }
+                    }
+                }
+                
+                if (match && closestDist < (canvas.width/2)**2) {
+                    ch.prevX = match.x;
+                    ch.prevY = match.y;
+                } else {
+                    ch.prevX = ch.x;
+                    ch.prevY = ch.y;
+                }
+            }
+        }
+
+        handHistory = currentHands;
+        activeHands = currentHands;
+    }
+
+    /* =========================================================================
+       LOGIKA PERMAINAN & KELAS NYAMUK
+       ========================================================================= */
+
+    class Mosquito {
+        constructor(playerZone, isTargetNum) {
+            this.radius = Math.min(canvas.width, canvas.height) * 0.06; // Ukuran responsif
+            if(this.radius < 30) this.radius = 30;
+
+            this.playerZone = playerZone; // 1 = Kiri/Penuh, 2 = Kanan
+            
+            // Batas gerak
+            let minX = this.radius;
+            let maxX = (currentMode === 'battle') 
+                ? (playerZone === 1 ? canvas.width/2 - this.radius : canvas.width - this.radius)
+                : canvas.width - this.radius;
+            
+            if (currentMode === 'battle' && playerZone === 2) {
+                minX = canvas.width/2 + this.radius;
+            }
+
+            this.x = Math.random() * (maxX - minX) + minX;
+            this.y = canvas.height + this.radius * 2; // Mulai dari bawah
+            
+            // Kecepatan
+            this.vx = (Math.random() - 0.5) * 4;
+            this.vy = -(Math.random() * 3 + 2); // Bergerak ke atas
+            
+            // Wiggle effect
+            this.wiggleOffset = Math.random() * Math.PI * 2;
+            this.wiggleSpeed = Math.random() * 0.1 + 0.05;
+            
+            // Angka (Target atau Bukan)
+            if (isTargetNum) {
+                this.number = targetNumber;
+            } else {
+                do {
+                    this.number = Math.floor(Math.random() * 10);
+                } while (this.number === targetNumber);
+            }
+            
+            this.isTarget = isTargetNum;
+            this.markedForDeletion = false;
+        }
+
+        update() {
+            this.x += this.vx + Math.sin(frameCount * this.wiggleSpeed + this.wiggleOffset) * 2;
+            this.y += this.vy;
+
+            // Pantulan dinding
+            let minX = this.radius;
+            let maxX = (currentMode === 'battle') 
+                ? (this.playerZone === 1 ? canvas.width/2 - this.radius : canvas.width - this.radius)
+                : canvas.width - this.radius;
+            
+            if (currentMode === 'battle' && this.playerZone === 2) {
+                minX = canvas.width/2 + this.radius;
+            }
+
+            if (this.x < minX || this.x > maxX) this.vx *= -1;
+            
+            // Hapus jika keluar layar atas
+            if (this.y < -this.radius * 2) {
+                this.markedForDeletion = true;
+            }
+        }
+
+        draw(c) {
+            c.save();
+            c.translate(this.x, this.y);
+            
+            // Sayap
+            c.fillStyle = "rgba(255, 255, 255, 0.7)";
+            c.beginPath();
+            c.ellipse(-this.radius*0.6, -this.radius*0.4, this.radius*0.8, this.radius*0.3, Math.PI/4 + Math.sin(frameCount*0.5)*0.2, 0, Math.PI*2);
+            c.fill();
+            c.beginPath();
+            c.ellipse(this.radius*0.6, -this.radius*0.4, this.radius*0.8, this.radius*0.3, -Math.PI/4 - Math.sin(frameCount*0.5)*0.2, 0, Math.PI*2);
+            c.fill();
+
+            // Badan
+            c.fillStyle = "#374151"; // Abu tua
+            c.beginPath();
+            c.arc(0, 0, this.radius, 0, Math.PI * 2);
+            c.fill();
+
+            // Moncong
+            c.strokeStyle = "#111827";
+            c.lineWidth = 4;
+            c.beginPath();
+            c.moveTo(0, this.radius*0.8);
+            c.lineTo(0, this.radius*1.5);
+            c.stroke();
+
+            // Lingkaran putih tengah
+            c.fillStyle = "white";
+            c.beginPath();
+            c.arc(0, 0, this.radius * 0.7, 0, Math.PI * 2);
+            c.fill();
+
+            // Teks Angka
+            c.fillStyle = this.isTarget ? "#d946ef" : "#1f2937"; // Ungu jika target, hitam jika bukan
+            c.font = `bold ${this.radius * 0.9}px 'Fredoka One'`;
+            c.textAlign = "center";
+            c.textBaseline = "middle";
+            c.fillText(this.number, 0, 0);
+
+            c.restore();
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            this.vx = (Math.random() - 0.5) * 10;
+            this.vy = (Math.random() - 0.5) * 10;
+            this.life = 1.0;
+            this.decay = Math.random() * 0.02 + 0.02;
+            this.color = color;
+            this.size = Math.random() * 8 + 4;
+        }
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.life -= this.decay;
+        }
+        draw(c) {
+            c.globalAlpha = this.life;
+            c.fillStyle = this.color;
+            c.beginPath();
+            c.arc(this.x, this.y, this.size, 0, Math.PI*2);
+            c.fill();
+            c.globalAlpha = 1.0;
+        }
+    }
+
+    /* =========================================================================
+       MATH & SUPER SENSITIVE COLLISION LOGIC
+       ========================================================================= */
+    function distSq(x1, y1, x2, y2) {
+        return (x1 - x2)**2 + (y1 - y2)**2;
+    }
+
+    // Jarak dari Titik (Nyamuk) ke Segmen Garis (Gerakan Tangan dari frame prev ke cur)
+    // Mencegah tembus saat tangan bergerak sangat cepat (Super Sensitif)
+    function pointToSegmentDistSq(px, py, x1, y1, x2, y2) {
+        let l2 = distSq(x1, y1, x2, y2);
+        if (l2 === 0) return distSq(px, py, x1, y1);
+        let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+        t = Math.max(0, Math.min(1, t));
+        return distSq(px, py, x1 + t * (x2 - x1), y1 + t * (y2 - y1));
+    }
+
+    function checkCollisions() {
+        for (let hand of activeHands) {
+            let hitRadius = 40 * hitBoxMultiplier; // Ukuran area tangkapan tangan
+            
+            for (let i = mosquitos.length - 1; i >= 0; i--) {
+                let mos = mosquitos[i];
+                
+                // Pengecekan Zona Pemain di mode Battle
+                if (currentMode === 'battle' && hand.player !== mos.playerZone) {
+                    continue; // Tangan P1 tidak bisa menangkap nyamuk P2
+                }
+
+                // Super Sensitif Pengecekan Tabrakan
+                // Cek jarak nyamuk ke garis lintasan tangan frame ini
+                let dSq = pointToSegmentDistSq(mos.x, mos.y, hand.prevX, hand.prevY, hand.x, hand.y);
+                let threshold = (hitRadius + mos.radius) ** 2;
+
+                if (dSq < threshold) {
+                    // TABRAKAN TERJADI!
+                    handleCatch(mos, hand);
+                    mosquitos.splice(i, 1);
+                }
+            }
+        }
+    }
+
+    let isRoundTransitioning = false;
+
+    function handleCatch(mos, hand) {
+        // Buat partikel
+        for(let j=0; j<15; j++) {
+            particles.push(new Particle(mos.x, mos.y, mos.isTarget ? '#f472b6' : '#9ca3af'));
+        }
+
+        if (mos.isTarget) {
+            // BENAR
+            if (hand.player === 1) scoreP1++;
+            if (hand.player === 2) scoreP2++;
+            updateScoreUI();
+            
+            // Jika belum transisi, lanjut ronde
+            if (!isRoundTransitioning) {
+                speak("Hebat sekali!");
+                isRoundTransitioning = true;
+                // Buat semua nyamuk di zona player ini menghilang atau ganti ronde
+                setTimeout(() => {
+                    startNextRound();
+                }, 1000);
+            }
+        } else {
+            // SALAH
+            speak("Belum tepat, coba lagi!");
+            // Efek visual layar merah sesaat?
+        }
+    }
+
+    /* =========================================================================
+       SIKLUS GAME & RONDE
+       ========================================================================= */
+    function startNextRound() {
+        if(gameState !== 'playing') return;
+        isRoundTransitioning = false;
+        
+        // Pilih angka target baru
+        targetNumber = Math.floor(Math.random() * 10);
+        document.getElementById('hud-target-number').innerText = targetNumber;
+        
+        speak(`Tangkap nyamuk angka ${targetNumber}`);
+
+        // Bersihkan nyamuk lama
+        mosquitos = [];
+
+        // Spawn baru
+        if (currentMode === 'solo') {
+            spawnMosquitosForZone(1);
+        } else {
+            spawnMosquitosForZone(1);
+            spawnMosquitosForZone(2);
+        }
+    }
+
+    function spawnMosquitosForZone(zone) {
+        // 1 target, 2-3 jebakan
+        mosquitos.push(new Mosquito(zone, true));
+        let traps = Math.floor(Math.random() * 2) + 2;
+        for(let i=0; i<traps; i++) {
+            mosquitos.push(new Mosquito(zone, false));
+        }
+    }
+
+    function autoRefillMosquitos() {
+        if(isRoundTransitioning) return;
+        
+        let p1HasTarget = false;
+        let p2HasTarget = false;
+        
+        for(let m of mosquitos) {
+            if(m.isTarget) {
+                if(m.playerZone === 1) p1HasTarget = true;
+                if(m.playerZone === 2) p2HasTarget = true;
+            }
+        }
+
+        if(currentMode === 'solo' && !p1HasTarget && mosquitos.length === 0) {
+            startNextRound(); // Auto lanjut jika layar kosong
+        }
+        if(currentMode === 'battle' && !p1HasTarget && !p2HasTarget && mosquitos.length === 0) {
+            startNextRound();
+        }
+    }
+
+    function updateScoreUI() {
+        document.getElementById('p1-score').innerText = scoreP1;
+        document.getElementById('p2-score').innerText = scoreP2;
+    }
+
+    /* =========================================================================
+       GAME LOOP & RENDER
+       ========================================================================= */
+    let frameCount = 0;
+    let lastTime = performance.now();
+
+    function gameLoop() {
+        if (gameState !== 'playing') return;
+
+        // Hitung FPS
+        let now = performance.now();
+        let dt = now - lastTime;
+        lastTime = now;
+        if(frameCount % 10 === 0) {
+            document.getElementById('dbg-fps').innerText = Math.round(1000/dt);
+        }
+        frameCount++;
+
+        // Bersihkan Canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+
+        // Update & Gambar Nyamuk
+        for (let i = mosquitos.length - 1; i >= 0; i--) {
+            let mos = mosquitos[i];
+            mos.update();
+            mos.draw(ctx);
+            if (mos.markedForDeletion) {
+                mosquitos.splice(i, 1);
+            }
+        }
+
+        autoRefillMosquitos();
+        checkCollisions();
+
+        // Gambar Tracker Tangan (Di fxCanvas agar selalu di atas)
+        for (let hand of activeHands) {
+            fxCtx.save();
+            fxCtx.translate(hand.x, hand.y);
+            
+            // Lingkaran utama
+            fxCtx.beginPath();
+            fxCtx.arc(0, 0, 30, 0, Math.PI*2);
+            fxCtx.fillStyle = (hand.player === 1) ? "rgba(236, 72, 153, 0.4)" : "rgba(59, 130, 246, 0.4)"; // Pink P1, Biru P2
+            fxCtx.fill();
+            fxCtx.lineWidth = 3;
+            fxCtx.strokeStyle = (hand.player === 1) ? "#ec4899" : "#3b82f6";
+            fxCtx.stroke();
+
+            // Titik tengah
+            fxCtx.beginPath();
+            fxCtx.arc(0, 0, 8, 0, Math.PI*2);
+            fxCtx.fillStyle = "white";
+            fxCtx.fill();
+
+            fxCtx.restore();
+        }
+
+        // Gambar Partikel
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i];
+            p.update();
+            p.draw(fxCtx);
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+
+        gameLoopRef = requestAnimationFrame(gameLoop);
+    }
+
+    function timerTick() {
+        if(gameState !== 'playing') return;
+        timeLeft--;
+        document.getElementById('timer').innerText = timeLeft;
+        if (timeLeft <= 0) {
+            endGame();
+        }
+    }
+
+    /* =========================================================================
+       PENGATURAN TAMPILAN / ALUR APLIKASI
+       ========================================================================= */
+    async function startGameMode(mode) {
+        currentMode = mode;
+        
+        // Inisialisasi Audio User Interaction
+        initSpeech();
+
+        // UI Setup
+        document.getElementById('screen-menu').classList.add('hidden');
+        document.getElementById('screen-result').classList.add('hidden');
+        document.getElementById('screen-calibration').classList.remove('hidden');
+        
+        document.getElementById('calib-title').innerText = "Menyiapkan Kamera...";
+        document.getElementById('calib-desc').innerText = "Mohon izinkan akses kamera di browser Anda.";
+        document.getElementById('calib-instruction').classList.add('hidden');
+        document.getElementById('btn-start-game').classList.add('hidden');
+        document.getElementById('calib-cam-preview').innerHTML = '<div class="animate-pulse text-pink-500 font-bold">Memuat...</div>';
+        document.getElementById('calib-cam-preview').style.borderColor = "#f472b6";
+
+        gameState = 'calibration';
+        
+        // Setup MediaPipe & Camera (Akan minta izin kamera jika belum)
+        try {
+            await initMediaPipe();
+            camera.start();
+            document.getElementById('dbg-status').innerText = "Kamera Aktif";
+        } catch (e) {
+            alert("Gagal mengakses kamera. Pastikan memberikan izin kamera dan gunakan localhost atau HTTPS.");
+            resetToMenu();
+        }
+    }
+
+    function startPlayPhase() {
+        gameState = 'playing';
+        document.getElementById('screen-calibration').classList.add('hidden');
+        document.getElementById('hud').classList.remove('hidden');
+        
+        // Setup Mode Tampilan
+        if (currentMode === 'battle') {
+            document.getElementById('split-line').classList.remove('hidden');
+            document.getElementById('hud-p2').classList.remove('hidden');
+        } else {
+            document.getElementById('split-line').classList.add('hidden');
+            document.getElementById('hud-p2').classList.add('hidden');
+        }
+
+        // Reset Variabel
+        scoreP1 = 0;
+        scoreP2 = 0;
+        timeLeft = GAME_DURATION;
+        mosquitos = [];
+        particles = [];
+        updateScoreUI();
+        document.getElementById('timer').innerText = timeLeft;
+
+        // Mulai Loop
+        gameLoopRef = requestAnimationFrame(gameLoop);
+        
+        // Mulai Timer
+        if(timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(timerTick, 1000);
+
+        // Mulai Ronde Pertama
+        setTimeout(() => {
+            startNextRound();
+        }, 1000);
+    }
+
+    function endGame() {
+        gameState = 'result';
+        clearInterval(timerInterval);
+        cancelAnimationFrame(gameLoopRef);
+        activeHands = [];
+        
+        document.getElementById('hud').classList.add('hidden');
+        document.getElementById('screen-result').classList.remove('hidden');
+        
+        document.getElementById('res-p1-score').innerText = scoreP1;
+        
+        if (currentMode === 'battle') {
+            document.getElementById('res-p2-box').classList.remove('hidden');
+            document.getElementById('res-p2-score').innerText = scoreP2;
+            
+            let winText = "Hasil Seri!";
+            if (scoreP1 > scoreP2) winText = "Pemain 1 Menang!";
+            if (scoreP2 > scoreP1) winText = "Pemain 2 Menang!";
+            document.getElementById('result-winner-text').innerText = winText;
+            speak(winText);
+        } else {
+            document.getElementById('res-p2-box').classList.add('hidden');
+            document.getElementById('result-winner-text').innerText = "Permainan Selesai!";
+            speak(`Permainan selesai. Skor kamu ${scoreP1}.`);
+        }
+    }
+
+    function resetToMenu() {
+        gameState = 'menu';
+        if(timerInterval) clearInterval(timerInterval);
+        cancelAnimationFrame(gameLoopRef);
+        
+        if(camera) {
+            camera.stop(); // Hemat baterai
+            document.getElementById('dbg-status').innerText = "Kamera Berhenti";
+        }
+
+        document.getElementById('screen-calibration').classList.add('hidden');
+        document.getElementById('screen-result').classList.add('hidden');
+        document.getElementById('hud').classList.add('hidden');
+        document.getElementById('split-line').classList.add('hidden');
+        
+        document.getElementById('screen-menu').classList.remove('hidden');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+    }
+
+</script>
+</body>
+</html>
